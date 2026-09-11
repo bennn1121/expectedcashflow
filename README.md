@@ -1,36 +1,62 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Ledgerline
 
-## Getting Started
+A cash flow forecasting tool: sign in, create a business, upload a CSV of bank
+transactions, and get a 13-week forecast with a plain-English explanation of
+the low point.
 
-First, run the development server:
+## Setup
+
+1. **Apply the database migration.** This project's Supabase publishable key
+   can't run DDL, so the schema has to be applied by hand once:
+   - Open the SQL Editor for the project at
+     https://supabase.com/dashboard/project/qqpiahsovponzwmapkcp/sql/new
+   - Paste in the contents of `supabase/migrations/0001_init.sql` and run it.
+   - This creates `accounts`, `transactions`, and `forecasts` with RLS
+     policies scoping every row to `auth.uid()`.
+2. `.env.local` is already populated with the project URL and publishable key.
+3. `npm install` (already done if you're reading this from the built repo).
+4. `npm run dev` and open http://localhost:3000 — unauthenticated requests
+   redirect to `/login`.
+
+## Testing the forecast engine
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm test
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Runs the vitest suite in `src/lib/forecast.test.ts` and `src/lib/csv.test.ts`,
+including worked examples with a known recurring payroll + vendor payment
+that collide to produce a checkable low-point explanation.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Trying it end-to-end
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+`sample-data/ledgerline-sample-transactions.csv` has nine months of synthetic
+history (Jan–Sep 2026): monthly payroll (-$8,200), a vendor payment every 30
+days (-$3,050), monthly rent (-$2,500), a 30-day hosting subscription
+(-$180), irregular customer payments, misc one-off expenses, and a few
+Amazon-style purchases with random reference codes (to confirm those don't
+get misclassified as recurring). It's timed so the next payroll and vendor
+payment land in the same week just after the data ends.
 
-## Learn More
+1. Sign up at `/login`, create a business from `/dashboard`.
+2. On `/accounts/[id]/settings`, set **Starting balance override** to `15000`
+   (the raw historical net in the sample data is negative, so leaving this
+   blank starts the forecast from an unrealistic base) — this is also where
+   **Minimum buffer** is set.
+3. On the account page, upload the sample CSV, confirm the column mapping,
+   then **Run forecast**.
 
-To learn more about Next.js, take a look at the following resources:
+## Architecture notes
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `src/lib/forecast.ts` — the forecasting engine. Pure functions, no
+  DB/UI imports, so it's independently testable.
+- `src/lib/csv.ts` — CSV column detection and row cleaning, also pure.
+- `src/lib/queries.ts` — the only place that talks to Supabase tables.
+- `src/lib/supabase/{client,server}.ts` — browser vs. server Supabase
+  clients (`@supabase/ssr`).
+- `src/proxy.ts` — session refresh + route protection. Next.js 16 renamed
+  `middleware.ts` to `proxy.ts`; behavior is otherwise unchanged.
+- Mutations are Server Actions (`actions.ts` beside each route), not API
+  routes — forms work without client JS where the flow allows it (sign
+  in/up, create/update/delete account, run forecast); the CSV upload is a
+  client component because it needs to parse and preview before committing.
