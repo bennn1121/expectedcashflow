@@ -2,6 +2,15 @@
 // No Supabase / DB / UI imports here on purpose — see forecast.test.ts for
 // worked examples that double as executable documentation of the algorithm.
 
+export type Horizon = "month" | "quarter" | "year";
+type BucketUnit = "week" | "month";
+
+export const HORIZON_LABELS: Record<Horizon, string> = {
+  month: "Month",
+  quarter: "Quarter",
+  year: "Year",
+};
+
 export interface RawTransaction {
   date: string; // ISO yyyy-mm-dd
   description: string;
@@ -18,13 +27,14 @@ export interface RecurringGroup {
 }
 
 export interface WeeklyDataPoint {
-  week_start: string; // ISO date
+  week_start: string; // ISO date — bucket start; weekly for month/quarter, monthly for year
   projected_in: number;
   projected_out: number;
   balance: number;
 }
 
 export interface ForecastResult {
+  horizon: Horizon;
   starting_balance: number;
   weekly_data: WeeklyDataPoint[];
   low_point_week: string;
@@ -37,10 +47,32 @@ export interface ForecastOptions {
   today?: Date;
   minimumBuffer?: number;
   startingBalanceOverride?: number | null;
+  horizon?: Horizon;
 }
 
-const WEEKS = 13;
-const HORIZON_DAYS = WEEKS * 7;
+interface HorizonSpec {
+  unit: BucketUnit;
+  count: number;
+}
+
+// Month uses weekly buckets too (5 weeks ~= a calendar month) so the near-term
+// view stays visually consistent with quarter; year switches to monthly
+// buckets since 52 weekly points is unreadable.
+const HORIZON_SPECS: Record<Horizon, HorizonSpec> = {
+  month: { unit: "week", count: 5 },
+  quarter: { unit: "week", count: 13 },
+  year: { unit: "month", count: 12 },
+};
+
+export const HORIZON_MIN_HISTORY_DAYS: Record<Horizon, number> = {
+  month: 60,
+  quarter: 90,
+  year: 180,
+};
+
+/** Below this much history, a year forecast hasn't seen a full annual cycle. */
+export const YEAR_FULL_CYCLE_DAYS = 365;
+
 const RECURRING_MIN_OCCURRENCES = 3;
 const RECURRING_CV_THRESHOLD = 0.35;
 const IRREGULAR_LOOKBACK_WEEKS = 10;
@@ -60,6 +92,18 @@ function toISODate(date: Date): string {
 
 function addDays(date: Date, days: number): Date {
   return new Date(date.getTime() + days * MS_PER_DAY);
+}
+
+/** Adds calendar months, clamping the day into the target month (e.g. Jan 31 + 1mo -> Feb 28/29). */
+function addMonthsClamped(date: Date, months: number): Date {
+  const day = date.getUTCDate();
+  const firstOfTarget = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1));
+  const daysInTargetMonth = new Date(
+    Date.UTC(firstOfTarget.getUTCFullYear(), firstOfTarget.getUTCMonth() + 1, 0)
+  ).getUTCDate();
+  return new Date(
+    Date.UTC(firstOfTarget.getUTCFullYear(), firstOfTarget.getUTCMonth(), Math.min(day, daysInTargetMonth))
+  );
 }
 
 function startOfDay(date: Date): Date {
@@ -202,8 +246,8 @@ function projectGroupForward(group: RecurringGroup, from: Date, horizonEnd: Date
 function estimateIrregularBaseline(
   nonRecurring: RawTransaction[],
   from: Date
-): { avgWeeklyIn: number; avgWeeklyOut: number } {
-  if (nonRecurring.length === 0) return { avgWeeklyIn: 0, avgWeeklyOut: 0 };
+): { avgDailyIn: number; avgDailyOut: number } {
+  if (nonRecurring.length === 0) return { avgDailyIn: 0, avgDailyOut: 0 };
 
   const lookbackDays = IRREGULAR_LOOKBACK_WEEKS * 7;
   let windowEnd = from;
@@ -233,9 +277,26 @@ function estimateIrregularBaseline(
   const totalOut = inWindow.filter((t) => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
 
   return {
-    avgWeeklyIn: totalIn / IRREGULAR_LOOKBACK_WEEKS,
-    avgWeeklyOut: totalOut / IRREGULAR_LOOKBACK_WEEKS,
+    avgDailyIn: totalIn / lookbackDays,
+    avgDailyOut: totalOut / lookbackDays,
   };
+}
+
+// ---------- bucketing per horizon ----------
+
+interface Bucket {
+  start: Date;
+  end: Date;
+}
+
+function bucketBoundaries(from: Date, spec: HorizonSpec): Bucket[] {
+  const buckets: Bucket[] = [];
+  for (let i = 0; i < spec.count; i++) {
+    const start = spec.unit === "week" ? addDays(from, i * 7) : addMonthsClamped(from, i);
+    const end = spec.unit === "week" ? addDays(start, 7) : addMonthsClamped(from, i + 1);
+    buckets.push({ start, end });
+  }
+  return buckets;
 }
 
 // ---------- formatting for the plain-English explanation ----------
@@ -254,20 +315,30 @@ function formatWeekLabel(iso: string): string {
   });
 }
 
-function buildLowPointExplanation(
-  lowWeek: WeeklyDataPoint,
-  minimumBuffer: number,
-  contributors: RecurringGroup[]
-): string {
-  const balanceStr = formatCurrency(lowWeek.balance);
-  const dateStr = formatWeekLabel(lowWeek.week_start);
+function formatMonthLabel(iso: string): string {
+  return parseDate(iso).toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
 
-  if (lowWeek.balance >= minimumBuffer) {
-    return `Your balance stays healthy throughout the next 13 weeks — the lowest point is ${balanceStr} in the week of ${dateStr}.`;
+function buildLowPointExplanation(
+  lowBucket: WeeklyDataPoint,
+  minimumBuffer: number,
+  contributors: RecurringGroup[],
+  horizonPhrase: string,
+  periodPhrase: string,
+  unitWord: "week" | "month"
+): string {
+  const balanceStr = formatCurrency(lowBucket.balance);
+
+  if (lowBucket.balance >= minimumBuffer) {
+    return `Your balance stays healthy throughout ${horizonPhrase} — the lowest point is ${balanceStr} in ${periodPhrase}.`;
   }
 
   if (contributors.length === 0) {
-    return `Your balance is projected to dip to ${balanceStr} in the week of ${dateStr}, based on your typical recurring and day-to-day cash flow.`;
+    return `Your balance is projected to dip to ${balanceStr} in ${periodPhrase}, based on your typical recurring and day-to-day cash flow.`;
   }
 
   const describe = (g: RecurringGroup) =>
@@ -277,18 +348,76 @@ function buildLowPointExplanation(
 
   const clause =
     contributors.length === 1
-      ? `${describe(contributors[0])} lands that week`
-      : `${describe(contributors[0])} lands the same week as ${describe(contributors[1])}`;
+      ? `${describe(contributors[0])} lands that ${unitWord}`
+      : `${describe(contributors[0])} lands the same ${unitWord} as ${describe(contributors[1])}`;
 
-  return `Your balance is projected to dip to ${balanceStr} in the week of ${dateStr}, mainly because ${clause}.`;
+  return `Your balance is projected to dip to ${balanceStr} in ${periodPhrase}, mainly because ${clause}.`;
+}
+
+// ---------- minimum history / eligibility gating ----------
+
+export interface HorizonEligibility {
+  horizon: Horizon;
+  eligible: boolean;
+  historyDays: number;
+  /** 0 when eligible; otherwise how many more days of history are needed. */
+  daysNeeded: number;
+  /** True only for an eligible year forecast that hasn't seen a full annual cycle yet. */
+  lowConfidence: boolean;
+}
+
+/** Days between the earliest and latest ISO date in `transactions`. */
+export function getHistoryDays(transactions: RawTransaction[]): number {
+  if (transactions.length === 0) return 0;
+  let earliest = Infinity;
+  let latest = -Infinity;
+  for (const t of transactions) {
+    const time = parseDate(t.date).getTime();
+    if (time < earliest) earliest = time;
+    if (time > latest) latest = time;
+  }
+  return Math.round((latest - earliest) / MS_PER_DAY);
+}
+
+/** Days between two ISO dates (order-independent). */
+export function daysBetweenIso(a: string, b: string): number {
+  return Math.round(Math.abs(parseDate(b).getTime() - parseDate(a).getTime()) / MS_PER_DAY);
+}
+
+export function computeHorizonEligibility(historyDays: number, horizon: Horizon): HorizonEligibility {
+  const required = HORIZON_MIN_HISTORY_DAYS[horizon];
+  const eligible = historyDays >= required;
+  return {
+    horizon,
+    eligible,
+    historyDays,
+    daysNeeded: eligible ? 0 : required - historyDays,
+    lowConfidence: horizon === "year" && eligible && historyDays < YEAR_FULL_CYCLE_DAYS,
+  };
+}
+
+export function getHorizonEligibility(transactions: RawTransaction[], horizon: Horizon): HorizonEligibility {
+  return computeHorizonEligibility(getHistoryDays(transactions), horizon);
+}
+
+export function getAllHorizonEligibility(historyDays: number): Record<Horizon, HorizonEligibility> {
+  return {
+    month: computeHorizonEligibility(historyDays, "month"),
+    quarter: computeHorizonEligibility(historyDays, "quarter"),
+    year: computeHorizonEligibility(historyDays, "year"),
+  };
 }
 
 // ---------- putting it all together ----------
 
 export function runForecast(transactions: RawTransaction[], options: ForecastOptions = {}): ForecastResult {
+  const horizon = options.horizon ?? "quarter";
+  const spec = HORIZON_SPECS[horizon];
   const from = startOfDay(options.today ?? new Date());
   const minimumBuffer = options.minimumBuffer ?? 0;
-  const horizonEnd = addDays(from, HORIZON_DAYS);
+
+  const buckets = bucketBoundaries(from, spec);
+  const horizonEnd = buckets[buckets.length - 1].end;
 
   const historical = transactions.filter((t) => parseDate(t.date) <= from);
 
@@ -296,49 +425,50 @@ export function runForecast(transactions: RawTransaction[], options: ForecastOpt
     options.startingBalanceOverride ?? historical.reduce((sum, t) => sum + t.amount, 0);
 
   const { recurring, nonRecurring } = detectRecurringGroups(historical);
-  const { avgWeeklyIn, avgWeeklyOut } = estimateIrregularBaseline(nonRecurring, from);
+  const { avgDailyIn, avgDailyOut } = estimateIrregularBaseline(nonRecurring, from);
 
   const projected = recurring.flatMap((g) => projectGroupForward(g, from, horizonEnd));
 
-  const weeklyData: WeeklyDataPoint[] = [];
+  const bucketData: WeeklyDataPoint[] = [];
   let balance = startingBalance;
 
-  for (let i = 0; i < WEEKS; i++) {
-    const weekStart = addDays(from, i * 7);
-    const weekEnd = addDays(weekStart, 7);
-
+  for (const { start, end } of buckets) {
     let recurringIn = 0;
     let recurringOut = 0;
     for (const occ of projected) {
-      if (occ.date >= weekStart && occ.date < weekEnd) {
+      if (occ.date >= start && occ.date < end) {
         if (occ.amount >= 0) recurringIn += occ.amount;
         else recurringOut += Math.abs(occ.amount);
       }
     }
 
-    const projected_in = round2(recurringIn + avgWeeklyIn);
-    const projected_out = round2(recurringOut + avgWeeklyOut);
+    const bucketDays = (end.getTime() - start.getTime()) / MS_PER_DAY;
+    const projected_in = round2(recurringIn + avgDailyIn * bucketDays);
+    const projected_out = round2(recurringOut + avgDailyOut * bucketDays);
     balance = balance + projected_in - projected_out;
 
-    weeklyData.push({
-      week_start: toISODate(weekStart),
+    bucketData.push({
+      week_start: toISODate(start),
       projected_in,
       projected_out,
       balance: round2(balance),
     });
   }
 
-  const lowWeek = weeklyData.reduce((min, w) => (w.balance < min.balance ? w : min), weeklyData[0]);
+  let lowIndex = 0;
+  for (let i = 1; i < bucketData.length; i++) {
+    if (bucketData[i].balance < bucketData[lowIndex].balance) lowIndex = i;
+  }
+  const lowBucket = bucketData[lowIndex];
+  const { start: lowBucketStart, end: lowBucketEnd } = buckets[lowIndex];
 
   // Contributors: outflow-type recurring groups with a projection landing in
-  // the low week, or in the 3 days just before it, ranked by size.
-  const lowWeekStart = parseDate(lowWeek.week_start);
-  const lookback = addDays(lowWeekStart, -3);
-  const lowWeekEnd = addDays(lowWeekStart, 7);
+  // the low bucket, or in the 3 days just before it, ranked by size.
+  const lookback = addDays(lowBucketStart, -3);
 
   const contributingByGroup = new Map<string, number>();
   for (const occ of projected) {
-    if (occ.amount < 0 && occ.date >= lookback && occ.date < lowWeekEnd) {
+    if (occ.amount < 0 && occ.date >= lookback && occ.date < lowBucketEnd) {
       const current = contributingByGroup.get(occ.group.key) ?? 0;
       if (Math.abs(occ.amount) > Math.abs(current)) {
         contributingByGroup.set(occ.group.key, occ.amount);
@@ -350,11 +480,24 @@ export function runForecast(transactions: RawTransaction[], options: ForecastOpt
     .sort((a, b) => Math.abs(contributingByGroup.get(b.key)!) - Math.abs(contributingByGroup.get(a.key)!))
     .slice(0, 2);
 
+  const unitWord: "week" | "month" = spec.unit === "month" ? "month" : "week";
+  const horizonPhrase = spec.unit === "month" ? `the next ${spec.count} months` : `the next ${spec.count} weeks`;
+  const periodPhrase =
+    spec.unit === "month" ? formatMonthLabel(lowBucket.week_start) : `the week of ${formatWeekLabel(lowBucket.week_start)}`;
+
   return {
+    horizon,
     starting_balance: round2(startingBalance),
-    weekly_data: weeklyData,
-    low_point_week: lowWeek.week_start,
-    low_point_balance: lowWeek.balance,
-    low_point_explanation: buildLowPointExplanation(lowWeek, minimumBuffer, contributors),
+    weekly_data: bucketData,
+    low_point_week: lowBucket.week_start,
+    low_point_balance: lowBucket.balance,
+    low_point_explanation: buildLowPointExplanation(
+      lowBucket,
+      minimumBuffer,
+      contributors,
+      horizonPhrase,
+      periodPhrase,
+      unitWord
+    ),
   };
 }

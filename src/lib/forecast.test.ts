@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { detectRecurringGroups, normalizeDescription, runForecast, type RawTransaction } from "./forecast";
+import {
+  computeHorizonEligibility,
+  detectRecurringGroups,
+  getHistoryDays,
+  getAllHorizonEligibility,
+  normalizeDescription,
+  runForecast,
+  type RawTransaction,
+} from "./forecast";
 
 const TODAY = new Date(Date.UTC(2026, 6, 1)); // 2026-07-01, the day after our synthetic data ends
 
@@ -151,5 +159,134 @@ describe("runForecast", () => {
     const result = runForecast(SAMPLE_TRANSACTIONS, { today: TODAY });
     const expectedStart = SAMPLE_TRANSACTIONS.reduce((sum, t) => sum + t.amount, 0);
     expect(result.starting_balance).toBeCloseTo(expectedStart, 2);
+  });
+
+  it("defaults to the quarter horizon when none is given", () => {
+    const result = runForecast(SAMPLE_TRANSACTIONS, { today: TODAY });
+    expect(result.horizon).toBe("quarter");
+  });
+});
+
+describe("runForecast — month horizon", () => {
+  it("produces 5 weekly buckets", () => {
+    const result = runForecast(SAMPLE_TRANSACTIONS, {
+      today: TODAY,
+      horizon: "month",
+      minimumBuffer: 500,
+      startingBalanceOverride: 2000,
+    });
+
+    expect(result.horizon).toBe("month");
+    expect(result.weekly_data).toHaveLength(5);
+    // Each bucket is a 7-day week, same shape as quarter's buckets.
+    const first = result.weekly_data[0];
+    const second = result.weekly_data[1];
+    expect(new Date(second.week_start).getTime() - new Date(first.week_start).getTime()).toBe(7 * 86_400_000);
+  });
+
+  it("mentions 'the next 5 weeks' when the balance stays healthy", () => {
+    const result = runForecast(SAMPLE_TRANSACTIONS, {
+      today: TODAY,
+      horizon: "month",
+      minimumBuffer: 0,
+      startingBalanceOverride: 500_000,
+    });
+    expect(result.low_point_explanation).toContain("the next 5 weeks");
+  });
+});
+
+describe("runForecast — year horizon", () => {
+  it("produces 12 monthly buckets spanning roughly a year", () => {
+    const result = runForecast(SAMPLE_TRANSACTIONS, {
+      today: TODAY,
+      horizon: "year",
+      minimumBuffer: 500,
+      startingBalanceOverride: 2000,
+    });
+
+    expect(result.horizon).toBe("year");
+    expect(result.weekly_data).toHaveLength(12);
+
+    const first = new Date(result.weekly_data[0].week_start);
+    const last = new Date(result.weekly_data[11].week_start);
+    const monthsApart =
+      (last.getUTCFullYear() - first.getUTCFullYear()) * 12 + (last.getUTCMonth() - first.getUTCMonth());
+    expect(monthsApart).toBe(11);
+  });
+
+  it("aggregates recurring + irregular projections into monthly totals", () => {
+    const result = runForecast(SAMPLE_TRANSACTIONS, {
+      today: TODAY,
+      horizon: "year",
+      minimumBuffer: 500,
+      startingBalanceOverride: 2000,
+    });
+
+    // Payroll + vendor + rent + hosting recur roughly monthly, so every
+    // monthly bucket should show meaningfully more outflow than a single
+    // weekly bucket would.
+    for (const bucket of result.weekly_data) {
+      expect(bucket.projected_out).toBeGreaterThan(1000);
+    }
+  });
+
+  it("phrases the explanation in months, not weeks", () => {
+    const result = runForecast(SAMPLE_TRANSACTIONS, {
+      today: TODAY,
+      horizon: "year",
+      minimumBuffer: 0,
+      startingBalanceOverride: 500_000,
+    });
+    expect(result.low_point_explanation).toContain("the next 12 months");
+    expect(result.low_point_explanation).not.toContain("week");
+  });
+});
+
+describe("getHistoryDays", () => {
+  it("returns 0 for no transactions", () => {
+    expect(getHistoryDays([])).toBe(0);
+  });
+
+  it("computes the span between earliest and latest transaction dates", () => {
+    const txns: RawTransaction[] = [
+      { date: "2026-01-01", description: "A", amount: 10 },
+      { date: "2026-03-02", description: "B", amount: -5 },
+    ];
+    expect(getHistoryDays(txns)).toBe(60);
+  });
+});
+
+describe("computeHorizonEligibility / getAllHorizonEligibility", () => {
+  it("gates month at 60 days, quarter at 90, year at 180", () => {
+    expect(computeHorizonEligibility(59, "month").eligible).toBe(false);
+    expect(computeHorizonEligibility(60, "month").eligible).toBe(true);
+    expect(computeHorizonEligibility(89, "quarter").eligible).toBe(false);
+    expect(computeHorizonEligibility(90, "quarter").eligible).toBe(true);
+    expect(computeHorizonEligibility(179, "year").eligible).toBe(false);
+    expect(computeHorizonEligibility(180, "year").eligible).toBe(true);
+  });
+
+  it("reports exactly how many more days are needed when ineligible", () => {
+    const e = computeHorizonEligibility(45, "month");
+    expect(e.eligible).toBe(false);
+    expect(e.daysNeeded).toBe(15);
+  });
+
+  it("flags year forecasts as low-confidence until a full annual cycle of history exists", () => {
+    const shortYear = computeHorizonEligibility(200, "year");
+    expect(shortYear.eligible).toBe(true);
+    expect(shortYear.lowConfidence).toBe(true);
+
+    const fullYear = computeHorizonEligibility(400, "year");
+    expect(fullYear.eligible).toBe(true);
+    expect(fullYear.lowConfidence).toBe(false);
+  });
+
+  it("getAllHorizonEligibility returns all three horizons keyed correctly", () => {
+    const all = getAllHorizonEligibility(100);
+    expect(all.month.eligible).toBe(true);
+    expect(all.quarter.eligible).toBe(true);
+    expect(all.year.eligible).toBe(false);
+    expect(all.year.daysNeeded).toBe(80);
   });
 });

@@ -1,3 +1,5 @@
+import type { Horizon } from "./forecast";
+
 export interface Account {
   id: string;
   user_id: string;
@@ -21,6 +23,7 @@ export interface TransactionRow {
 export interface ForecastRow {
   id: string;
   account_id: string;
+  horizon: Horizon;
   generated_at: string;
   starting_balance: number;
   weekly_data: { week_start: string; projected_in: number; projected_out: number; balance: number }[];

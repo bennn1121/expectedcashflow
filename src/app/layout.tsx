@@ -1,12 +1,6 @@
 import type { Metadata } from "next";
-import { Fraunces, JetBrains_Mono, Inter } from "next/font/google";
+import { JetBrains_Mono, Inter } from "next/font/google";
 import "./globals.css";
-
-const fraunces = Fraunces({
-  variable: "--font-fraunces",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-});
 
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
@@ -26,7 +20,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${fraunces.variable} ${jetbrainsMono.variable} ${inter.variable}`}>
+    <html lang="en" className={`${jetbrainsMono.variable} ${inter.variable}`}>
       <body>{children}</body>
     </html>
   );

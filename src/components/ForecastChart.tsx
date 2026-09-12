@@ -12,6 +12,8 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import type { ForecastRow } from "@/lib/types";
+import { formatMoney } from "@/lib/currency";
+import { useCurrency } from "./CurrencyProvider";
 
 function formatShortDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -22,16 +24,25 @@ function formatShortDate(iso: string): string {
   });
 }
 
-export function ForecastChart({ weeklyData }: { weeklyData: ForecastRow["weekly_data"] }) {
+export function ForecastChart({
+  weeklyData,
+  height = 320,
+}: {
+  weeklyData: ForecastRow["weekly_data"];
+  height?: number;
+}) {
+  const { convert, displayCurrency, rateStatus, nativeCurrency } = useCurrency();
+  const currency = rateStatus === "error" ? nativeCurrency : displayCurrency;
+
   const data = weeklyData.map((w) => ({
     week: formatShortDate(w.week_start),
-    in: Math.round(w.projected_in),
-    out: -Math.round(w.projected_out),
-    balance: Math.round(w.balance),
+    in: Math.round(convert(w.projected_in)),
+    out: -Math.round(convert(w.projected_out)),
+    balance: Math.round(convert(w.balance)),
   }));
 
   return (
-    <div style={{ width: "100%", height: 320 }}>
+    <div style={{ width: "100%", height }}>
       <ResponsiveContainer>
         <ComposedChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid stroke="var(--hairline)" vertical={false} />
@@ -40,7 +51,7 @@ export function ForecastChart({ weeklyData }: { weeklyData: ForecastRow["weekly_
           <Tooltip
             contentStyle={{ background: "var(--surface)", border: "1px solid var(--hairline)", borderRadius: 8, fontSize: 13 }}
             formatter={(value, name) => [
-              `$${Math.abs(Number(value)).toLocaleString()}`,
+              formatMoney(Math.abs(Number(value)), currency),
               name === "in" ? "Projected in" : name === "out" ? "Projected out" : "Balance",
             ]}
           />
