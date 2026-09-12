@@ -2,14 +2,10 @@
 // No Supabase / DB / UI imports here on purpose — see forecast.test.ts for
 // worked examples that double as executable documentation of the algorithm.
 
+import type { Locale } from "./i18n";
+
 export type Horizon = "month" | "quarter" | "year";
 type BucketUnit = "week" | "month";
-
-export const HORIZON_LABELS: Record<Horizon, string> = {
-  month: "Month",
-  quarter: "Quarter",
-  year: "Year",
-};
 
 export interface RawTransaction {
   date: string; // ISO yyyy-mm-dd
@@ -48,6 +44,8 @@ export interface ForecastOptions {
   minimumBuffer?: number;
   startingBalanceOverride?: number | null;
   horizon?: Horizon;
+  /** Language for the generated low-point explanation sentence. Defaults to "en". */
+  locale?: Locale;
 }
 
 interface HorizonSpec {
@@ -299,7 +297,11 @@ function bucketBoundaries(from: Date, spec: HorizonSpec): Bucket[] {
   return buckets;
 }
 
-// ---------- formatting for the plain-English explanation ----------
+// ---------- formatting + language for the plain-English explanation ----------
+//
+// Currency formatting is deliberately identical in both languages — it's
+// unrelated to the display-currency toggle, which only ever affects the
+// UI's rendered numbers, never this stored, native-currency explanation text.
 
 function formatCurrency(n: number): string {
   const rounded = Math.round(n);
@@ -307,31 +309,34 @@ function formatCurrency(n: number): string {
   return rounded < 0 ? `-$${formatted}` : `$${formatted}`;
 }
 
-function formatWeekLabel(iso: string): string {
-  return parseDate(iso).toLocaleDateString("en-US", {
+function formatWeekLabel(iso: string, locale: Locale): string {
+  return parseDate(iso).toLocaleDateString(locale === "he" ? "he" : "en-US", {
     month: "long",
     day: "numeric",
     timeZone: "UTC",
   });
 }
 
-function formatMonthLabel(iso: string): string {
-  return parseDate(iso).toLocaleDateString("en-US", {
+function formatMonthLabel(iso: string, locale: Locale): string {
+  return parseDate(iso).toLocaleDateString(locale === "he" ? "he" : "en-US", {
     month: "long",
     year: "numeric",
     timeZone: "UTC",
   });
 }
 
-function buildLowPointExplanation(
+function buildLowPointExplanationEn(
   lowBucket: WeeklyDataPoint,
   minimumBuffer: number,
   contributors: RecurringGroup[],
-  horizonPhrase: string,
-  periodPhrase: string,
-  unitWord: "week" | "month"
+  unit: BucketUnit,
+  bucketCount: number
 ): string {
   const balanceStr = formatCurrency(lowBucket.balance);
+  const unitWord = unit === "month" ? "month" : "week";
+  const horizonPhrase = unit === "month" ? `the next ${bucketCount} months` : `the next ${bucketCount} weeks`;
+  const periodPhrase =
+    unit === "month" ? formatMonthLabel(lowBucket.week_start, "en") : `the week of ${formatWeekLabel(lowBucket.week_start, "en")}`;
 
   if (lowBucket.balance >= minimumBuffer) {
     return `Your balance stays healthy throughout ${horizonPhrase} — the lowest point is ${balanceStr} in ${periodPhrase}.`;
@@ -352,6 +357,59 @@ function buildLowPointExplanation(
       : `${describe(contributors[0])} lands the same ${unitWord} as ${describe(contributors[1])}`;
 
   return `Your balance is projected to dip to ${balanceStr} in ${periodPhrase}, mainly because ${clause}.`;
+}
+
+/**
+ * Hebrew explanation, built from scratch with its own sentence structure
+ * rather than a machine translation of the English strings — grammar and
+ * word order both differ. Recurring-payment labels (`g.label`) are left
+ * untouched since they're the payee's own bank description text.
+ */
+function buildLowPointExplanationHe(
+  lowBucket: WeeklyDataPoint,
+  minimumBuffer: number,
+  contributors: RecurringGroup[],
+  unit: BucketUnit,
+  bucketCount: number
+): string {
+  const balanceStr = formatCurrency(lowBucket.balance);
+  const unitWordHe = unit === "month" ? "חודש" : "שבוע";
+  const horizonPhrase = unit === "month" ? `${bucketCount} החודשים הבאים` : `${bucketCount} השבועות הבאים`;
+  const periodPhrase =
+    unit === "month" ? formatMonthLabel(lowBucket.week_start, "he") : `שבוע של ${formatWeekLabel(lowBucket.week_start, "he")}`;
+
+  if (lowBucket.balance >= minimumBuffer) {
+    return `היתרה שלך נשארת יציבה לאורך ${horizonPhrase} — הנקודה הנמוכה ביותר היא ${balanceStr} ב${periodPhrase}.`;
+  }
+
+  if (contributors.length === 0) {
+    return `היתרה שלך צפויה לרדת ל-${balanceStr} ב${periodPhrase}, בהתבסס על תזרים המזומנים הקבוע והשוטף האופייני לך.`;
+  }
+
+  const describe = (g: RecurringGroup) =>
+    `התשלום הקבוע שלך ל-'${g.label}' (כ-${formatCurrency(Math.abs(g.averageAmount))}, כל ${Math.round(
+      g.averageIntervalDays
+    )} ימים)`;
+
+  const clause =
+    contributors.length === 1
+      ? `${describe(contributors[0])} חל באותו ה${unitWordHe}`
+      : `${describe(contributors[0])} חל באותו ה${unitWordHe} יחד עם ${describe(contributors[1])}`;
+
+  return `היתרה שלך צפויה לרדת ל-${balanceStr} ב${periodPhrase}, בעיקר בגלל ש${clause}.`;
+}
+
+function buildLowPointExplanation(
+  lowBucket: WeeklyDataPoint,
+  minimumBuffer: number,
+  contributors: RecurringGroup[],
+  unit: BucketUnit,
+  bucketCount: number,
+  locale: Locale
+): string {
+  return locale === "he"
+    ? buildLowPointExplanationHe(lowBucket, minimumBuffer, contributors, unit, bucketCount)
+    : buildLowPointExplanationEn(lowBucket, minimumBuffer, contributors, unit, bucketCount);
 }
 
 // ---------- minimum history / eligibility gating ----------
@@ -480,10 +538,7 @@ export function runForecast(transactions: RawTransaction[], options: ForecastOpt
     .sort((a, b) => Math.abs(contributingByGroup.get(b.key)!) - Math.abs(contributingByGroup.get(a.key)!))
     .slice(0, 2);
 
-  const unitWord: "week" | "month" = spec.unit === "month" ? "month" : "week";
-  const horizonPhrase = spec.unit === "month" ? `the next ${spec.count} months` : `the next ${spec.count} weeks`;
-  const periodPhrase =
-    spec.unit === "month" ? formatMonthLabel(lowBucket.week_start) : `the week of ${formatWeekLabel(lowBucket.week_start)}`;
+  const locale: Locale = options.locale ?? "en";
 
   return {
     horizon,
@@ -491,13 +546,6 @@ export function runForecast(transactions: RawTransaction[], options: ForecastOpt
     weekly_data: bucketData,
     low_point_week: lowBucket.week_start,
     low_point_balance: lowBucket.balance,
-    low_point_explanation: buildLowPointExplanation(
-      lowBucket,
-      minimumBuffer,
-      contributors,
-      horizonPhrase,
-      periodPhrase,
-      unitWord
-    ),
+    low_point_explanation: buildLowPointExplanation(lowBucket, minimumBuffer, contributors, spec.unit, spec.count, locale),
   };
 }

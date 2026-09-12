@@ -14,6 +14,7 @@ import {
 import type { ForecastRow } from "@/lib/types";
 import { formatMoney } from "@/lib/currency";
 import { useCurrency } from "./CurrencyProvider";
+import { useLocale } from "./LocaleProvider";
 
 function formatShortDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -32,6 +33,7 @@ export function ForecastChart({
   height?: number;
 }) {
   const { convert, displayCurrency, rateStatus, nativeCurrency } = useCurrency();
+  const { t } = useLocale();
   const currency = rateStatus === "error" ? nativeCurrency : displayCurrency;
 
   const data = weeklyData.map((w) => ({
@@ -52,7 +54,7 @@ export function ForecastChart({
             contentStyle={{ background: "var(--surface)", border: "1px solid var(--hairline)", borderRadius: 8, fontSize: 13 }}
             formatter={(value, name) => [
               formatMoney(Math.abs(Number(value)), currency),
-              name === "in" ? "Projected in" : name === "out" ? "Projected out" : "Balance",
+              name === "in" ? t("chartProjectedIn") : name === "out" ? t("chartProjectedOut") : t("chartBalance"),
             ]}
           />
           <ReferenceLine y={0} stroke="var(--ink-muted)" />

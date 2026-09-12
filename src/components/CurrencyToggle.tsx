@@ -1,11 +1,13 @@
 "use client";
 
 import { useCurrency } from "./CurrencyProvider";
+import { useLocale } from "./LocaleProvider";
 
 const OPTIONS = ["USD", "ILS"] as const;
 
 export function CurrencyToggle() {
   const { displayCurrency, setDisplayCurrency, rate, rateStatus, nativeCurrency } = useCurrency();
+  const { t } = useLocale();
   const isConverting = nativeCurrency.toUpperCase() !== displayCurrency;
 
   return (
@@ -23,17 +25,15 @@ export function CurrencyToggle() {
         ))}
       </div>
 
-      {isConverting && rateStatus === "loading" && (
-        <span className="currency-toggle__note">Fetching exchange rate…</span>
-      )}
+      {isConverting && rateStatus === "loading" && <span className="currency-toggle__note">{t("fetchingRate")}</span>}
       {isConverting && rateStatus === "ok" && rate !== null && (
         <span className="currency-toggle__note">
-          1 {nativeCurrency.toUpperCase()} ≈ {rate.toFixed(4)} {displayCurrency}, for display only
+          {t("rateNote", { from: nativeCurrency.toUpperCase(), rate: rate.toFixed(4), to: displayCurrency })}
         </span>
       )}
       {isConverting && rateStatus === "error" && (
         <span className="currency-toggle__note currency-toggle__note--warning">
-          Conversion temporarily unavailable — showing {nativeCurrency.toUpperCase()}
+          {t("rateUnavailable", { currency: nativeCurrency.toUpperCase() })}
         </span>
       )}
     </div>

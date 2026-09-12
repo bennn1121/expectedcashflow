@@ -460,13 +460,13 @@ select:focus-visible,
 }
 
 .horizon-option input {
-  margin-right: 6px;
+  margin-inline-end: 6px;
 }
 
 .horizon-option__hint {
   font-size: 0.78rem;
   color: var(--ink-muted);
-  margin-left: 20px;
+  margin-inline-start: 20px;
 }
 
 /* ---------------------------------------------------------------- */
@@ -484,7 +484,7 @@ table.ledger {
 }
 
 table.ledger th {
-  text-align: left;
+  text-align: start;
   font-weight: 500;
   color: var(--ink-muted);
   font-size: 0.8rem;
@@ -601,8 +601,16 @@ table.ledger td.amount-negative {
   padding: 32px;
 }
 
-.auth-card h1 {
+.auth-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 6px;
+}
+
+.auth-card h1 {
+  margin-bottom: 0;
 }
 
 .auth-card__subtitle {
@@ -619,8 +627,17 @@ table.ledger td.amount-negative {
 }
 
 /* ---------------------------------------------------------------- */
-/* CSV upload                                                         */
+/* CSV / Excel upload                                                 */
 /* ---------------------------------------------------------------- */
+
+.upload-subheading {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 10px;
+}
 
 .dropzone {
   border: 1.5px dashed var(--hairline);

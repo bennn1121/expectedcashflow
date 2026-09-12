@@ -92,7 +92,7 @@ function toIsoIfValid(year: number, month: number, day: number): string | null {
   return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
 }
 
-function parseAmount(value: string | undefined): number | null {
+export function parseAmount(value: string | undefined): number | null {
   if (value === undefined) return null;
   const cleaned = value.trim().replace(/[$,]/g, "");
   if (cleaned === "") return null;

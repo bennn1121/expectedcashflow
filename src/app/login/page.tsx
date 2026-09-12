@@ -1,5 +1,8 @@
 import Link from "next/link";
 import { authAction } from "./actions";
+import { T } from "@/components/LocaleProvider";
+import { LocaleHiddenInput } from "@/components/LocaleHiddenInput";
+import { LanguageToggle } from "@/components/LanguageToggle";
 
 export default async function LoginPage({
   searchParams,
@@ -14,9 +17,12 @@ export default async function LoginPage({
   return (
     <div className="auth-shell">
       <div className="auth-card">
-        <h1>Ledgerline</h1>
+        <div className="auth-card__top">
+          <h1>Ledgerline</h1>
+          <LanguageToggle />
+        </div>
         <p className="auth-card__subtitle">
-          {isSignup ? "Create an account to start forecasting." : "Sign in to your business."}
+          <T k={isSignup ? "loginSubtitleSignup" : "loginSubtitleSignin"} />
         </p>
 
         {params.error && <div className="form-error">{params.error}</div>}
@@ -24,14 +30,19 @@ export default async function LoginPage({
         <form action={authAction} className="stack">
           <input type="hidden" name="mode" value={mode} />
           <input type="hidden" name="redirect" value={redirectTo} />
+          <LocaleHiddenInput />
 
           <div className="field">
-            <label htmlFor="email">Email</label>
+            <label htmlFor="email">
+              <T k="emailLabel" />
+            </label>
             <input id="email" name="email" type="email" autoComplete="email" required />
           </div>
 
           <div className="field">
-            <label htmlFor="password">Password</label>
+            <label htmlFor="password">
+              <T k="passwordLabel" />
+            </label>
             <input
               id="password"
               name="password"
@@ -43,23 +54,23 @@ export default async function LoginPage({
           </div>
 
           <button type="submit" className="btn btn-primary">
-            {isSignup ? "Create account" : "Sign in"}
+            <T k={isSignup ? "createAccountButton" : "signInButton"} />
           </button>
         </form>
 
         <p className="auth-toggle">
           {isSignup ? (
             <>
-              Already have an account?{" "}
+              <T k="alreadyHaveAccount" />{" "}
               <Link href={`/login?mode=signin${redirectTo !== "/dashboard" ? `&redirect=${redirectTo}` : ""}`}>
-                Sign in
+                <T k="signInLink" />
               </Link>
             </>
           ) : (
             <>
-              New to Ledgerline?{" "}
+              <T k="newToLedgerline" />{" "}
               <Link href={`/login?mode=signup${redirectTo !== "/dashboard" ? `&redirect=${redirectTo}` : ""}`}>
-                Create an account
+                <T k="createAccountLink" />
               </Link>
             </>
           )}

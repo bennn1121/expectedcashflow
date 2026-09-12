@@ -242,6 +242,52 @@ describe("runForecast — year horizon", () => {
   });
 });
 
+describe("runForecast — Hebrew locale", () => {
+  it("defaults to English when no locale is given", () => {
+    const result = runForecast(SAMPLE_TRANSACTIONS, { today: TODAY, minimumBuffer: 500, startingBalanceOverride: 2000 });
+    expect(result.low_point_explanation).toMatch(/mainly because/);
+  });
+
+  it("builds a Hebrew sentence with the same recurring payee labels and numbers, not a translated English one", () => {
+    const en = runForecast(SAMPLE_TRANSACTIONS, {
+      today: TODAY,
+      minimumBuffer: 500,
+      startingBalanceOverride: 2000,
+      locale: "en",
+    });
+    const he = runForecast(SAMPLE_TRANSACTIONS, {
+      today: TODAY,
+      minimumBuffer: 500,
+      startingBalanceOverride: 2000,
+      locale: "he",
+    });
+
+    // Same underlying numbers regardless of language.
+    expect(he.low_point_balance).toBe(en.low_point_balance);
+    expect(he.low_point_week).toBe(en.low_point_week);
+
+    // Payee labels are untouched bank-description text, present in both.
+    expect(he.low_point_explanation).toContain("PAYROLL - ACME LLC STAFF");
+    expect(he.low_point_explanation).toContain("ACME SUPPLIES CO - INVOICE");
+
+    // Actually Hebrew, not English prose with substituted values.
+    expect(he.low_point_explanation).toContain("היתרה שלך");
+    expect(he.low_point_explanation).not.toContain("Your balance");
+    expect(he.low_point_explanation).not.toContain("mainly because");
+  });
+
+  it("phrases the healthy case in Hebrew too", () => {
+    const he = runForecast(SAMPLE_TRANSACTIONS, {
+      today: TODAY,
+      minimumBuffer: 0,
+      startingBalanceOverride: 500_000,
+      locale: "he",
+    });
+    expect(he.low_point_explanation).toContain("יציבה");
+    expect(he.low_point_explanation).not.toMatch(/[a-zA-Z]{4,}/); // no stray English prose words
+  });
+});
+
 describe("getHistoryDays", () => {
   it("returns 0 for no transactions", () => {
     expect(getHistoryDays([])).toBe(0);

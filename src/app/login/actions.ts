@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { translations, parseLocaleFormField } from "@/lib/i18n";
 
 function loginRedirect(mode: string, redirectTo: string, error: string) {
   const url = new URL("/login", "http://localhost");
@@ -16,18 +17,19 @@ export async function authAction(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
   const redirectTo = String(formData.get("redirect") ?? "/dashboard");
+  const locale = parseLocaleFormField(formData.get("locale"));
 
   if (!email || !password) {
-    loginRedirect(mode, redirectTo, "Enter an email and password.");
+    loginRedirect(mode, redirectTo, translations[locale].errorEnterEmailPassword);
   }
 
   const supabase = await createClient();
 
   if (mode === "signup") {
     const { error } = await supabase.auth.signUp({ email, password });
+    // Supabase's own auth error messages are English-only regardless of locale.
     if (error) loginRedirect(mode, redirectTo, error.message);
-    // Supabase may require email confirmation depending on project settings.
-    loginRedirect("signin", redirectTo, "Account created — sign in below.");
+    loginRedirect("signin", redirectTo, translations[locale].infoAccountCreated);
   } else {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) loginRedirect(mode, redirectTo, error.message);

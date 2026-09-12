@@ -90,6 +90,59 @@ export async function listAllTransactionsForForecast(
   return data as { date: string; description: string; amount: number }[];
 }
 
+/** Every transaction for an account, full columns, oldest first — used by Excel export and import diffing. */
+export async function listAllTransactionsFull(supabase: SupabaseClient, accountId: string): Promise<TransactionRow[]> {
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("*")
+    .eq("account_id", accountId)
+    .order("date", { ascending: true });
+  if (error) throw error;
+  return data as TransactionRow[];
+}
+
+/** Every forecast run for an account, full columns, most recent first — used by Excel export. */
+export async function listAllForecastsFull(supabase: SupabaseClient, accountId: string): Promise<ForecastRow[]> {
+  const { data, error } = await supabase
+    .from("forecasts")
+    .select("*")
+    .eq("account_id", accountId)
+    .order("generated_at", { ascending: false });
+  if (error) throw error;
+  return data as ForecastRow[];
+}
+
+export interface ApplyExcelImportInput {
+  accountId: string;
+  accountPatch: {
+    name?: string;
+    currency?: string;
+    minimum_buffer?: number;
+    starting_balance_override?: number | null;
+  } | null;
+  toInsert: { date: string; description: string; amount: number; source: string }[];
+  toUpdate: { id: string; date: string; description: string; amount: number; source: string }[];
+  toDeleteIds: string[];
+}
+
+/**
+ * Applies an Excel-import diff as one atomic operation via the
+ * `apply_excel_import` Postgres function (see
+ * supabase/migrations/0003_apply_excel_import.sql) — a single RPC call is
+ * one Postgres transaction, so a failure partway through rolls back
+ * everything rather than leaving a half-applied import.
+ */
+export async function applyExcelImport(supabase: SupabaseClient, input: ApplyExcelImportInput): Promise<void> {
+  const { error } = await supabase.rpc("apply_excel_import", {
+    p_account_id: input.accountId,
+    p_account_patch: input.accountPatch,
+    p_inserts: input.toInsert,
+    p_updates: input.toUpdate,
+    p_delete_ids: input.toDeleteIds,
+  });
+  if (error) throw error;
+}
+
 /** Most recent forecast for one specific horizon (used by the forecasts overview). */
 export async function getLatestForecast(
   supabase: SupabaseClient,

@@ -1,6 +1,15 @@
-import { HORIZON_LABELS, type Horizon, type HorizonEligibility } from "@/lib/forecast";
+"use client";
+
+import { type Horizon, type HorizonEligibility } from "@/lib/forecast";
+import { pluralS, type TranslationKey } from "@/lib/i18n";
+import { useLocale } from "./LocaleProvider";
 
 const ORDER: Horizon[] = ["month", "quarter", "year"];
+const LABEL_KEYS: Record<Horizon, TranslationKey> = {
+  month: "horizonMonth",
+  quarter: "horizonQuarter",
+  year: "horizonYear",
+};
 
 /**
  * Native radio group so horizon selection works without client JS. Ineligible
@@ -13,6 +22,8 @@ export function HorizonSelector({
   eligibility: Record<Horizon, HorizonEligibility>;
   defaultHorizon: Horizon;
 }) {
+  const { t, locale } = useLocale();
+
   return (
     <div className="horizon-selector" role="radiogroup" aria-label="Forecast horizon">
       {ORDER.map((h) => {
@@ -20,15 +31,13 @@ export function HorizonSelector({
         return (
           <label key={h} className={`horizon-option ${!e.eligible ? "is-disabled" : ""}`}>
             <input type="radio" name="horizon" value={h} defaultChecked={h === defaultHorizon} disabled={!e.eligible} />
-            <span className="horizon-option__label">{HORIZON_LABELS[h]}</span>
+            <span className="horizon-option__label">{t(LABEL_KEYS[h])}</span>
             {!e.eligible && (
               <span className="horizon-option__hint">
-                Needs {e.daysNeeded} more day{e.daysNeeded === 1 ? "" : "s"} of transaction history
+                {t("horizonNeedsMoreDays", { days: e.daysNeeded, plural: pluralS(e.daysNeeded, locale) })}
               </span>
             )}
-            {e.eligible && e.lowConfidence && (
-              <span className="horizon-option__hint">Confidence is lower — under a full year of history</span>
-            )}
+            {e.eligible && e.lowConfidence && <span className="horizon-option__hint">{t("horizonLowConfidence")}</span>}
           </label>
         );
       })}

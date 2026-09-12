@@ -10,10 +10,13 @@ import {
   type SkippedRow,
 } from "@/lib/csv";
 import { importTransactionsAction } from "@/app/accounts/[id]/actions";
+import { useLocale } from "@/components/LocaleProvider";
+import { pluralS } from "@/lib/i18n";
 
 type Stage = "idle" | "previewing" | "importing" | "done";
 
 export function CsvUpload({ accountId }: { accountId: string }) {
+  const { t, locale } = useLocale();
   const [stage, setStage] = useState<Stage>("idle");
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<RawCsvRow[]>([]);
@@ -89,7 +92,7 @@ export function CsvUpload({ accountId }: { accountId: string }) {
               if (file) handleFile(file);
             }}
           />
-          Click to choose a CSV of bank transactions
+          {t("csvDropzone")}
         </label>
         {parseError && <div className="form-error">{parseError}</div>}
       </div>
@@ -100,21 +103,19 @@ export function CsvUpload({ accountId }: { accountId: string }) {
     return (
       <div className="stack">
         <div className="form-error" style={{ background: "rgba(47,158,110,0.09)", borderColor: "rgba(47,158,110,0.35)", color: "var(--forest-ink)" }}>
-          Imported {result.imported} transaction{result.imported === 1 ? "" : "s"}.
-          {result.skipped.length > 0 && ` Skipped ${result.skipped.length} row${result.skipped.length === 1 ? "" : "s"}.`}
+          {t("csvImported", { count: result.imported, plural: pluralS(result.imported, locale) })}
+          {result.skipped.length > 0 && t("csvSkipped", { count: result.skipped.length, plural: pluralS(result.skipped.length, locale) })}
         </div>
         {result.skipped.length > 0 && (
           <ul className="skip-summary">
             {result.skipped.slice(0, 10).map((s) => (
-              <li key={s.row}>
-                Row {s.row}: {s.reason}
-              </li>
+              <li key={s.row}>{t("csvRowLabel", { row: s.row, reason: s.reason })}</li>
             ))}
-            {result.skipped.length > 10 && <li>…and {result.skipped.length - 10} more</li>}
+            {result.skipped.length > 10 && <li>{t("csvAndMore", { count: result.skipped.length - 10 })}</li>}
           </ul>
         )}
         <button className="btn btn-secondary" onClick={reset} style={{ alignSelf: "flex-start" }}>
-          Upload another file
+          {t("csvUploadAnother")}
         </button>
       </div>
     );
@@ -128,9 +129,9 @@ export function CsvUpload({ accountId }: { accountId: string }) {
 
       <div className="mapping-grid">
         <div className="field">
-          <label>Date column</label>
+          <label>{t("csvDateColumn")}</label>
           <select value={mapping?.date ?? ""} onChange={(e) => updateMapping({ date: e.target.value })}>
-            <option value="">Choose…</option>
+            <option value="">{t("csvChoose")}</option>
             {headers.map((h) => (
               <option key={h} value={h}>
                 {h}
@@ -139,9 +140,9 @@ export function CsvUpload({ accountId }: { accountId: string }) {
           </select>
         </div>
         <div className="field">
-          <label>Description column</label>
+          <label>{t("csvDescriptionColumn")}</label>
           <select value={mapping?.description ?? ""} onChange={(e) => updateMapping({ description: e.target.value })}>
-            <option value="">Choose…</option>
+            <option value="">{t("csvChoose")}</option>
             {headers.map((h) => (
               <option key={h} value={h}>
                 {h}
@@ -150,22 +151,22 @@ export function CsvUpload({ accountId }: { accountId: string }) {
           </select>
         </div>
         <div className="field">
-          <label>Amount format</label>
+          <label>{t("csvAmountFormat")}</label>
           <select
             value={mapping?.mode ?? "single"}
             onChange={(e) => updateMapping({ mode: e.target.value as ColumnMapping["mode"] })}
           >
-            <option value="single">Single signed amount</option>
-            <option value="debit-credit">Separate debit / credit</option>
+            <option value="single">{t("csvSingleSignedAmount")}</option>
+            <option value="debit-credit">{t("csvSeparateDebitCredit")}</option>
           </select>
         </div>
 
         {mapping?.mode === "debit-credit" ? (
           <>
             <div className="field">
-              <label>Debit column</label>
+              <label>{t("csvDebitColumn")}</label>
               <select value={mapping?.debit ?? ""} onChange={(e) => updateMapping({ debit: e.target.value })}>
-                <option value="">Choose…</option>
+                <option value="">{t("csvChoose")}</option>
                 {headers.map((h) => (
                   <option key={h} value={h}>
                     {h}
@@ -174,9 +175,9 @@ export function CsvUpload({ accountId }: { accountId: string }) {
               </select>
             </div>
             <div className="field">
-              <label>Credit column</label>
+              <label>{t("csvCreditColumn")}</label>
               <select value={mapping?.credit ?? ""} onChange={(e) => updateMapping({ credit: e.target.value })}>
-                <option value="">Choose…</option>
+                <option value="">{t("csvChoose")}</option>
                 {headers.map((h) => (
                   <option key={h} value={h}>
                     {h}
@@ -187,9 +188,9 @@ export function CsvUpload({ accountId }: { accountId: string }) {
           </>
         ) : (
           <div className="field">
-            <label>Amount column</label>
+            <label>{t("csvAmountColumn")}</label>
             <select value={mapping?.amount ?? ""} onChange={(e) => updateMapping({ amount: e.target.value })}>
-              <option value="">Choose…</option>
+              <option value="">{t("csvChoose")}</option>
               {headers.map((h) => (
                 <option key={h} value={h}>
                   {h}
@@ -220,7 +221,7 @@ export function CsvUpload({ accountId }: { accountId: string }) {
           </tbody>
         </table>
       </div>
-      <p className="form-note">Showing the first {preview.length} of {rows.length} parsed rows.</p>
+      <p className="form-note">{t("csvShowingRows", { shown: preview.length, total: rows.length })}</p>
 
       <div style={{ display: "flex", gap: 12 }}>
         <button
@@ -228,10 +229,10 @@ export function CsvUpload({ accountId }: { accountId: string }) {
           disabled={!mappingComplete || stage === "importing"}
           onClick={handleConfirm}
         >
-          {stage === "importing" ? "Importing…" : `Import ${rows.length} rows`}
+          {stage === "importing" ? t("csvImporting") : t("csvImportRows", { count: rows.length })}
         </button>
         <button className="btn btn-secondary" onClick={reset}>
-          Cancel
+          {t("csvCancel")}
         </button>
       </div>
     </div>
